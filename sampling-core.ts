@@ -110,6 +110,17 @@ export function mergeConfig(global: SamplingConfig | undefined, project: Samplin
 		result.models = { ...result.models, ...project.models };
 	}
 
+	if (global?.agentProfiles) {
+		result.agentProfiles = { ...global.agentProfiles };
+	}
+	if (project?.agentProfiles) {
+		result.agentProfiles = result.agentProfiles ?? {};
+		for (const [agentType, projectMapping] of Object.entries(project.agentProfiles)) {
+			const globalMapping = result.agentProfiles[agentType] ?? {};
+			result.agentProfiles[agentType] = { ...globalMapping, ...projectMapping };
+		}
+	}
+
 	return result;
 }
 

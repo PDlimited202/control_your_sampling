@@ -5,6 +5,7 @@
 
 import {
   loadConfig,
+  getConfigPath,
   getActiveParams,
   hasAnySamplingParams,
   isOpenAiStyleApi,
@@ -70,30 +71,32 @@ function test(name: string, fn: () => void) {
 
 test("loadConfig handles missing files gracefully", () => {
   const config = loadConfig("/nonexistent/path");
-  assertEqual(config.profiles, undefined, "No profiles for missing files");
-  assertEqual(config.models, undefined, "No models for missing files");
+  assert(typeof config === "object", "Returns an object");
+  assert(config !== null, "Returns non-null");
+  // Global config at ~/.pi/agent/sampling.json is loaded when project config is missing
+  assert(config.profiles !== undefined || config.agentProfiles !== undefined || config.models !== undefined, "Loads global config when available");
 });
 
 // --- Pattern matching ---
 
 test("matchPattern exact match", () => {
-  assert(matchPattern("ollama/llama3.1:8b", "ollama/llama3.1:8b"), "Exact match works");
+  assert(matchPattern("llama.cpp/llama3.1:8b", "llama.cpp/llama3.1:8b"), "Exact match works");
 });
 
 test("matchPattern wildcard at end", () => {
-  assert(matchPattern("ollama/llama*", "ollama/llama3.1:8b"), "Wildcard matches suffix");
-  assert(matchPattern("ollama/llama*", "ollama/llama3"), "Wildcard matches shorter name");
-  assert(!matchPattern("ollama/llama*", "ollama/qwen2.5"), "Wildcard doesn't match different model");
+  assert(matchPattern("llama.cpp/llama*", "llama.cpp/llama3.1:8b"), "Wildcard matches suffix");
+  assert(matchPattern("llama.cpp/llama*", "llama.cpp/llama3"), "Wildcard matches shorter name");
+  assert(!matchPattern("llama.cpp/llama*", "llama.cpp/qwen2.5"), "Wildcard doesn't match different model");
 });
 
 test("matchPattern wildcard at start", () => {
-  assert(matchPattern("*/qwen*", "ollama/qwen2.5"), "Wildcard at start matches provider");
+  assert(matchPattern("*/qwen*", "llama.cpp/qwen2.5"), "Wildcard at start matches provider");
   assert(matchPattern("*/qwen*", "vllm/qwen-coder"), "Wildcard at start matches any provider");
 });
 
 test("matchPattern full wildcard", () => {
   assert(matchPattern("openrouter/*", "openrouter/anthropic/claude-3.5-sonnet"), "Full wildcard matches");
-  assert(!matchPattern("openrouter/*", "ollama/llama3"), "Full wildcard doesn't match different provider");
+  assert(!matchPattern("openrouter/*", "llama.cpp/llama3"), "Full wildcard doesn't match different provider");
 });
 
 test("matchPattern double wildcard", () => {
@@ -104,15 +107,15 @@ test("matchPattern double wildcard", () => {
 
 test("findMatchingParams returns first match", () => {
   const models: Record<string, SamplingParams> = {
-    "ollama/llama*": { temperature: 0.8 },
-    "ollama/llama3.1*": { temperature: 0.9 },
+    "llama.cpp/llama*": { temperature: 0.8 },
+    "llama.cpp/llama3.1*": { temperature: 0.9 },
   };
-  const result = findMatchingParams("ollama/llama3.1:8b", models);
+  const result = findMatchingParams("llama.cpp/llama3.1:8b", models);
   assertEqual(result?.temperature, 0.8, "First match wins");
 });
 
 test("findMatchingParams returns undefined for no match", () => {
-  const result = findMatchingParams("unknown/model", { "ollama/*": { temperature: 0.5 } });
+  const result = findMatchingParams("unknown/model", { "llama.cpp/*": { temperature: 0.5 } });
   assertEqual(result, undefined, "No match returns undefined");
 });
 
@@ -121,18 +124,46 @@ test("findMatchingParams returns undefined for no match", () => {
 test("mergeConfig merges profiles and models", () => {
   const global: SamplingConfig = {
     profiles: { default: { temperature: 0.7 }, global: { temperature: 0.5 } },
-    models: { "ollama/*": { temperature: 0.8 } },
+    models: { "llama.cpp/*": { temperature: 0.8 } },
   };
   const project: SamplingConfig = {
     profiles: { default: { temperature: 0.6 }, project: { temperature: 0.4 } },
-    models: { "ollama/llama*": { temperature: 0.9 } },
+    models: { "llama.cpp/llama*": { temperature: 0.9 } },
   };
   const merged = mergeConfig(global, project);
   assertEqual(merged.profiles?.default?.temperature, 0.6, "Project overrides global profile");
   assertEqual(merged.profiles?.global?.temperature, 0.5, "Global-only profile preserved");
   assertEqual(merged.profiles?.project?.temperature, 0.4, "Project-only profile added");
-  assertEqual(merged.models?.["ollama/llama*"]?.temperature, 0.9, "Project model overrides global");
-  assertEqual(merged.models?.["ollama/*"]?.temperature, 0.8, "Global-only model preserved");
+  assertEqual(merged.models?.["llama.cpp/llama*"]?.temperature, 0.9, "Project model overrides global");
+  assertEqual(merged.models?.["llama.cpp/*"]?.temperature, 0.8, "Global-only model preserved");
+});
+
+test("mergeConfig merges agentProfiles", () => {
+  const global: SamplingConfig = {
+    profiles: { default: { temperature: 0.7 }, precise: { temperature: 0.2 } },
+    agentProfiles: {
+      Explore: { "*": "precise", "llama.cpp/*": "default" },
+      Plan: { "*": "precise" },
+    },
+  };
+  const project: SamplingConfig = {
+    agentProfiles: {
+      Explore: { "accounts/fireworks/*": "creative" },
+      general: { "*": "default" },
+    },
+  };
+  const merged = mergeConfig(global, project);
+  assertEqual(merged.agentProfiles?.Explore?.["*"], "precise", "Global agent wildcard preserved");
+  assertEqual(merged.agentProfiles?.Explore?.["llama.cpp/*"], "default", "Global agent pattern preserved");
+  assertEqual(merged.agentProfiles?.Explore?.["accounts/fireworks/*"], "creative", "Project agent pattern added");
+  assertEqual(merged.agentProfiles?.Plan?.["*"], "precise", "Global-only agent profile preserved");
+  assertEqual(merged.agentProfiles?.general?.["*"], "default", "Project-only agent profile added");
+});
+
+test("getConfigPath returns correct paths", () => {
+  const paths = getConfigPath("/some/project");
+  assert(paths.global.endsWith(".pi/agent/sampling.json"), "Global path ends with .pi/agent/sampling.json");
+  assertEqual(paths.project, "/some/project/.pi/sampling.json", "Project path includes cwd");
 });
 
 // --- getActiveParams ---
@@ -141,7 +172,7 @@ test("getActiveParams uses default profile when no active profile", () => {
   const config: SamplingConfig = {
     profiles: { default: { temperature: 0.7, top_p: 0.9 } },
   };
-  const params = getActiveParams("ollama/llama3", config, undefined);
+  const params = getActiveParams("llama.cpp/llama3", config, undefined);
   assertEqual(params.temperature, 0.7, "Default profile temperature applied");
   assertEqual(params.top_p, 0.9, "Default profile top_p applied");
 });
@@ -150,16 +181,16 @@ test("getActiveParams uses active profile", () => {
   const config: SamplingConfig = {
     profiles: { default: { temperature: 0.7 }, precise: { temperature: 0.2 } },
   };
-  const params = getActiveParams("ollama/llama3", config, "precise");
+  const params = getActiveParams("llama.cpp/llama3", config, "precise");
   assertEqual(params.temperature, 0.2, "Active profile temperature applied");
 });
 
 test("getActiveParams model overrides win", () => {
   const config: SamplingConfig = {
     profiles: { default: { temperature: 0.7, top_p: 0.9 } },
-    models: { "ollama/llama*": { temperature: 0.8 } },
+    models: { "llama.cpp/llama*": { temperature: 0.8 } },
   };
-  const params = getActiveParams("ollama/llama3.1:8b", config, undefined);
+  const params = getActiveParams("llama.cpp/llama3.1:8b", config, undefined);
   assertEqual(params.temperature, 0.8, "Model override wins");
   assertEqual(params.top_p, 0.9, "Profile param preserved when not overridden");
 });
@@ -167,9 +198,9 @@ test("getActiveParams model overrides win", () => {
 test("getActiveParams active profile + model override", () => {
   const config: SamplingConfig = {
     profiles: { precise: { temperature: 0.2, top_p: 0.1 } },
-    models: { "ollama/llama*": { temperature: 0.8 } },
+    models: { "llama.cpp/llama*": { temperature: 0.8 } },
   };
-  const params = getActiveParams("ollama/llama3", config, "precise");
+  const params = getActiveParams("llama.cpp/llama3", config, "precise");
   assertEqual(params.temperature, 0.8, "Model override wins over profile");
   assertEqual(params.top_p, 0.1, "Profile param preserved");
 });
@@ -299,7 +330,7 @@ test("resolveEffectiveProfile falls back to active profile when no agent match",
   const config: SamplingConfig = {
     profiles: { default: { temperature: 0.7 }, precise: { temperature: 0.2 } },
     agentProfiles: {
-      Explore: { "ollama/*": "precise" },
+      Explore: { "llama.cpp/*": "precise" },
     },
   };
   const result = resolveEffectiveProfile("accounts/fireworks/models/kimi-k2p6", config, "default", "Explore");
@@ -384,8 +415,8 @@ test("getActiveParams model overrides override agent profile", () => {
 // --- findMatchingValue ---
 
 test("findMatchingValue returns string values", () => {
-  const mapping = { "ollama/*": "ollama-profile", "accounts/fireworks/*": "fireworks-profile" };
-  assertEqual(findMatchingValue("ollama/llama3", mapping), "ollama-profile", "Matches ollama pattern");
+  const mapping = { "llama.cpp/*": "llama.cpp-profile", "accounts/fireworks/*": "fireworks-profile" };
+  assertEqual(findMatchingValue("llama.cpp/llama3", mapping), "llama.cpp-profile", "Matches llama.cpp pattern");
   assertEqual(findMatchingValue("accounts/fireworks/models/kimi-k2p6", mapping), "fireworks-profile", "Matches fireworks pattern");
   assertEqual(findMatchingValue("openai/gpt-4", mapping), undefined, "No match returns undefined");
 });

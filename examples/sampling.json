@@ -28,13 +28,13 @@
     }
   },
   "models": {
-    "ollama/llama*": {
+    "vllm/llama*": {
       "temperature": 0.8,
       "top_p": 0.95,
       "top_k": 50,
       "min_p": 0.05
     },
-    "ollama/qwen*": {
+    "vllm/qwen*": {
       "temperature": 0.6,
       "top_p": 0.8,
       "top_k": 30

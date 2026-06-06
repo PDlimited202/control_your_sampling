@@ -2,7 +2,7 @@
 
 Per-model, per-profile sampling parameter control for the pi coding agent.
 
-Built for OpenAI-compatible API endpoints (Ollama, vLLM, SGLang, LM Studio, OpenRouter, etc.).
+Built for OpenAI-compatible API endpoints (llama.cpp, vLLM, SGLang, LM Studio, OpenRouter, Fireworks, Deepinfra,  etc.).
 
 ## Why This Matters
 
@@ -56,13 +56,13 @@ See [`examples/sampling.json`](examples/sampling.json) for a full example with p
     }
   },
   "models": {
-    "ollama/llama*": {
+    "vllm/llama*": {
       "temperature": 0.8,
       "top_p": 0.95,
       "top_k": 50,
       "min_p": 0.05
     },
-    "ollama/qwen*": {
+    "vllm/qwen*": {
       "temperature": 0.6,
       "top_p": 0.8,
       "top_k": 30
@@ -98,7 +98,7 @@ All parameters are injected at the top level of the OpenAI chat completions requ
 | `repetition_penalty` | Multiplicative penalty for repetition | 1.0 - 2.0 |
 | `seed` | Deterministic seed for reproducible outputs | Integer |
 
-Most OpenAI-compatible backends ignore unknown parameters, so you can safely include parameters your specific backend doesn't support (e.g., `min_p` for Ollama, `top_k` for vLLM).
+Most OpenAI-compatible backends ignore unknown parameters, so you can safely include parameters your specific backend doesn't support (e.g., `min_p` for llama.cpp, `top_k` for vLLM).
 
 ### Model Matching
 
@@ -106,8 +106,8 @@ Model patterns use glob-style matching on `provider/model-id`:
 
 | Pattern | Matches |
 |---------|---------|
-| `ollama/llama3.1:8b` | Exact match |
-| `ollama/llama*` | Any Llama model from Ollama |
+| `vllm/llama3.1:8b` | Exact match |
+| `vllm/llama*` | Any Llama model from llama.cpp |
 | `*/qwen*` | Any Qwen model from any provider |
 | `openrouter/*` | Any model from OpenRouter |
 
@@ -144,7 +144,7 @@ When you switch profiles, the model-specific overrides from the config still app
 1. Profile defaults (`profiles.<name>`)
 2. Model-specific overrides (`models.<pattern>`)
 
-For example, with profile `precise` active and model `ollama/llama3.1:8b`:
+For example, with profile `precise` active and model `vllm/llama3.1:8b`:
 - Profile gives `temperature: 0.2, top_p: 0.1`
 - Model override gives `temperature: 0.8, top_p: 0.95`
 - Final: `temperature: 0.8, top_p: 0.95` (model override wins)

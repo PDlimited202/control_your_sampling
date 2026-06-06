@@ -2,7 +2,7 @@
  * Control Your Sampling - Pi Extension
  *
  * Per-model, per-profile, per-agent-type sampling parameter control for OpenAI-compatible API endpoints.
- * Supports Ollama, vLLM, SGLang, LM Studio, OpenRouter, and other OpenAI-compatible backends.
+ * Supports llama.cpp, vLLM, SGLang, LM Studio, OpenRouter, and other OpenAI-compatible backends.
  */
 
 import { existsSync, mkdirSync, appendFileSync } from "node:fs";
@@ -212,7 +212,7 @@ export default function samplingExtension(pi: ExtensionAPI) {
 			}
 
 			// Reload config on demand
-			if (arg === "reload") {
+			if (arg === "reload" || arg === "load-config") {
 				config = loadConfig(ctx.cwd);
 				const profiles = Object.keys(config.profiles ?? {});
 				const models = Object.keys(config.models ?? {});
