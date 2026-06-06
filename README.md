@@ -20,7 +20,7 @@ This extension gives you fine-grained control over sampling parameters per model
 ### As a Pi Package (Recommended)
 
 ```bash
-pi install git:github.com/peter/control_your_sampling
+pi install git:github.com/PDlimited202/control_your_sampling
 ```
 
 ### Manual Installation
