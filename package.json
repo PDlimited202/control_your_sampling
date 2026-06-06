@@ -1,0 +1,10 @@
+{
+  "name": "control-your-sampling",
+  "version": "1.0.0",
+  "description": "Per-model, per-profile sampling parameter control for OpenAI-compatible API endpoints in pi",
+  "keywords": ["pi-package"],
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./sampling.ts"]
+  }
+}

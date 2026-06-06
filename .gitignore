@@ -1,0 +1,4 @@
+node_modules/
+.pi/sampling-debug.log
+*.log
+.DS_Store

@@ -1,0 +1,37 @@
+{
+  "profiles": {
+    "default": {
+      "temperature": 0.7,
+      "top_p": 0.9,
+      "top_k": 40
+    },
+    "creative": {
+      "temperature": 0.9,
+      "top_p": 0.95,
+      "top_k": 60
+    },
+    "precise": {
+      "temperature": 0.2,
+      "top_p": 0.1,
+      "top_k": 20
+    },
+    "coding": {
+      "temperature": 0.4,
+      "top_p": 0.85,
+      "top_k": 35
+    }
+  },
+  "models": {
+    "ollama/llama*": {
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "top_k": 50,
+      "min_p": 0.05
+    },
+    "ollama/qwen*": {
+      "temperature": 0.6,
+      "top_p": 0.8,
+      "top_k": 30
+    }
+  }
+}
