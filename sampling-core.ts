@@ -29,6 +29,23 @@ export interface SamplingProfile extends SamplingParams {
 export interface SamplingConfig {
 	profiles?: Record<string, SamplingProfile>;
 	models?: Record<string, SamplingParams>;
+	/**
+	 * Agent-specific profile overrides.
+	 * Maps agent type (from pi-subagents <active_agent> tag) to
+	 * model-pattern → profile-name mappings.
+	 *
+	 * Example:
+	 * {
+	 *   "Explore": {
+	 *     "accounts/fireworks/models/kimi-k2p6": "kimi-precise",
+	 *     "*": "explore-default"
+	 *   },
+	 *   "general-purpose": {
+	 *     "accounts/fireworks/models/kimi-k2p6": "default"
+	 *   }
+	 * }
+	 */
+	agentProfiles?: Record<string, Record<string, string>>;
 }
 
 // ============================================================================
@@ -135,19 +152,63 @@ export function findMatchingParams(modelId: string, modelConfig: Record<string, 
 	return undefined;
 }
 
+export function findMatchingValue<T>(modelId: string, mapping: Record<string, T> | undefined): T | undefined {
+	if (!mapping) return undefined;
+	for (const [pattern, value] of Object.entries(mapping)) {
+		if (matchPattern(pattern, modelId)) {
+			return value;
+		}
+	}
+	return undefined;
+}
+
 // ============================================================================
 // Sampling Parameter Resolution
 // ============================================================================
+
+/**
+ * Parse the <active_agent name="..."/> tag from a system prompt string.
+ * Returns the agent type name, or undefined if no tag is found (main agent).
+ */
+export function parseActiveAgentTag(systemPrompt: string): string | undefined {
+	const match = systemPrompt.match(/<active_agent\s+name="([^"]+)"\s*\/?>\s?/);
+	return match ? match[1] : undefined;
+}
+
+/**
+ * Resolve the effective profile name for a given model, considering
+ * agent-specific profile overrides.
+ */
+export function resolveEffectiveProfile(
+	modelId: string,
+	config: SamplingConfig,
+	activeProfileName: string | undefined,
+	agentType: string | undefined,
+): string | undefined {
+	// Check agent-specific profile override first
+	if (agentType && config.agentProfiles?.[agentType]) {
+		const modelMapping = config.agentProfiles[agentType];
+		const overrideProfile = findMatchingValue(modelId, modelMapping);
+		if (overrideProfile) {
+			return overrideProfile;
+		}
+	}
+	return activeProfileName;
+}
 
 export function getActiveParams(
 	modelId: string,
 	config: SamplingConfig,
 	activeProfileName: string | undefined,
+	agentType?: string | undefined,
 ): SamplingParams {
 	const result: SamplingParams = {};
 
-	if (activeProfileName && config.profiles?.[activeProfileName]) {
-		Object.assign(result, config.profiles[activeProfileName]);
+	// Resolve which profile to use (agent-specific overrides take precedence)
+	const effectiveProfile = resolveEffectiveProfile(modelId, config, activeProfileName, agentType);
+
+	if (effectiveProfile && config.profiles?.[effectiveProfile]) {
+		Object.assign(result, config.profiles[effectiveProfile]);
 	} else if (config.profiles?.default) {
 		Object.assign(result, config.profiles.default);
 	}

@@ -13,7 +13,10 @@ import {
   getProfileNames,
   matchPattern,
   findMatchingParams,
+  findMatchingValue,
   mergeConfig,
+  parseActiveAgentTag,
+  resolveEffectiveProfile,
   OPENAI_STYLE_APIS,
   type SamplingConfig,
   type SamplingParams,
@@ -259,6 +262,132 @@ test("formatSamplingStatus formats correctly", () => {
 test("getProfileNames returns sorted names", () => {
   const config: SamplingConfig = { profiles: { zebra: {}, apple: {}, mango: {} } };
   assertEqual(getProfileNames(config), ["apple", "mango", "zebra"], "Names sorted alphabetically");
+});
+
+// --- parseActiveAgentTag ---
+
+test("parseActiveAgentTag extracts agent name from tag", () => {
+  assertEqual(parseActiveAgentTag("<active_agent name=\"Explore\"/>\n\nYou are a file search specialist."), "Explore", "Extracts Explore");
+  assertEqual(parseActiveAgentTag("<active_agent name=\"Plan\"/>\n"), "Plan", "Extracts Plan");
+  assertEqual(parseActiveAgentTag("<active_agent name=\"general-purpose\"/>\n"), "general-purpose", "Extracts general-purpose");
+});
+
+test("parseActiveAgentTag returns undefined for main agent", () => {
+  assertEqual(parseActiveAgentTag("You are a helpful coding assistant."), undefined, "No tag returns undefined");
+  assertEqual(parseActiveAgentTag(""), undefined, "Empty string returns undefined");
+  assertEqual(parseActiveAgentTag("<some_other_tag name=\"foo\"/>"), undefined, "Other tag returns undefined");
+});
+
+test("parseActiveAgentTag handles self-closing tag variant", () => {
+  assertEqual(parseActiveAgentTag("<active_agent name=\"Explore\" />\n\nSome prompt."), "Explore", "Handles space before />");
+});
+
+// --- resolveEffectiveProfile ---
+
+test("resolveEffectiveProfile returns agent-specific profile", () => {
+  const config: SamplingConfig = {
+    profiles: { default: { temperature: 0.7 }, precise: { temperature: 0.2 } },
+    agentProfiles: {
+      Explore: { "accounts/fireworks/*": "precise" },
+    },
+  };
+  const result = resolveEffectiveProfile("accounts/fireworks/models/kimi-k2p6", config, "default", "Explore");
+  assertEqual(result, "precise", "Agent-specific model override wins");
+});
+
+test("resolveEffectiveProfile falls back to active profile when no agent match", () => {
+  const config: SamplingConfig = {
+    profiles: { default: { temperature: 0.7 }, precise: { temperature: 0.2 } },
+    agentProfiles: {
+      Explore: { "ollama/*": "precise" },
+    },
+  };
+  const result = resolveEffectiveProfile("accounts/fireworks/models/kimi-k2p6", config, "default", "Explore");
+  assertEqual(result, "default", "Falls back to active profile when model doesn't match");
+});
+
+test("resolveEffectiveProfile falls back to active profile when no agent type", () => {
+  const config: SamplingConfig = {
+    profiles: { default: { temperature: 0.7 } },
+    agentProfiles: {
+      Explore: { "*": "precise" },
+    },
+  };
+  const result = resolveEffectiveProfile("any/model", config, "default", undefined);
+  assertEqual(result, "default", "Main agent uses active profile");
+});
+
+test("resolveEffectiveProfile uses wildcard for agent type", () => {
+  const config: SamplingConfig = {
+    profiles: { default: { temperature: 0.7 }, explore: { temperature: 0.5 } },
+    agentProfiles: {
+      Explore: { "*": "explore" },
+    },
+  };
+  const result = resolveEffectiveProfile("any/model", config, "default", "Explore");
+  assertEqual(result, "explore", "Wildcard matches any model");
+});
+
+test("resolveEffectiveProfile first match wins within agent type", () => {
+  const config: SamplingConfig = {
+    profiles: { default: { temperature: 0.7 }, precise: { temperature: 0.2 }, creative: { temperature: 0.9 } },
+    agentProfiles: {
+      Explore: {
+        "accounts/fireworks/*": "precise",
+        "*": "creative",
+      },
+    },
+  };
+  const result = resolveEffectiveProfile("accounts/fireworks/models/kimi-k2p6", config, "default", "Explore");
+  assertEqual(result, "precise", "First match wins (specific before wildcard)");
+});
+
+// --- getActiveParams with agent type ---
+
+test("getActiveParams with agent type uses agent-specific profile", () => {
+  const config: SamplingConfig = {
+    profiles: { default: { temperature: 0.7 }, precise: { temperature: 0.2, top_p: 0.1 } },
+    models: { "*": { top_k: 40 } },
+    agentProfiles: {
+      Explore: { "*": "precise" },
+    },
+  };
+  const params = getActiveParams("any/model", config, "default", "Explore");
+  assertEqual(params.temperature, 0.2, "Uses agent-specific profile");
+  assertEqual(params.top_p, 0.1, "Uses agent-specific profile params");
+  assertEqual(params.top_k, 40, "Model overrides still apply");
+});
+
+test("getActiveParams main agent ignores agentProfiles", () => {
+  const config: SamplingConfig = {
+    profiles: { default: { temperature: 0.7 }, precise: { temperature: 0.2 } },
+    agentProfiles: {
+      Explore: { "*": "precise" },
+    },
+  };
+  const params = getActiveParams("any/model", config, "default", undefined);
+  assertEqual(params.temperature, 0.7, "Main agent uses default profile");
+});
+
+test("getActiveParams model overrides override agent profile", () => {
+  const config: SamplingConfig = {
+    profiles: { default: { temperature: 0.7 }, precise: { temperature: 0.2 } },
+    models: { "accounts/fireworks/*": { temperature: 0.5 } },
+    agentProfiles: {
+      Explore: { "*": "precise" },
+    },
+  };
+  const params = getActiveParams("accounts/fireworks/models/kimi-k2p6", config, "default", "Explore");
+  assertEqual(params.temperature, 0.5, "Model override wins over agent profile");
+});
+
+// --- findMatchingValue ---
+
+test("findMatchingValue returns string values", () => {
+  const mapping = { "ollama/*": "ollama-profile", "accounts/fireworks/*": "fireworks-profile" };
+  assertEqual(findMatchingValue("ollama/llama3", mapping), "ollama-profile", "Matches ollama pattern");
+  assertEqual(findMatchingValue("accounts/fireworks/models/kimi-k2p6", mapping), "fireworks-profile", "Matches fireworks pattern");
+  assertEqual(findMatchingValue("openai/gpt-4", mapping), undefined, "No match returns undefined");
 });
 
 // --- Edge cases ---

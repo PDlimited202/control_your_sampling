@@ -15,6 +15,12 @@
       "top_p": 0.1,
       "top_k": 20
     },
+    "kimi-precise": {
+      "temperature": 0.15,
+      "top_p": 0.08,
+      "top_k": 15,
+      "min_p": 0.02
+    },
     "coding": {
       "temperature": 0.4,
       "top_p": 0.85,
@@ -32,6 +38,16 @@
       "temperature": 0.6,
       "top_p": 0.8,
       "top_k": 30
+    }
+  },
+  "agentProfiles": {
+    "Explore": {
+      "accounts/fireworks/models/kimi-k2p6": "kimi-precise",
+      "*": "precise"
+    },
+    "Plan": {
+      "accounts/fireworks/models/kimi-k2p6": "coding",
+      "*": "coding"
     }
   }
 }

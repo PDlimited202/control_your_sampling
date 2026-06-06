@@ -1,7 +1,7 @@
 /**
  * Control Your Sampling - Pi Extension
  *
- * Per-model, per-profile sampling parameter control for OpenAI-compatible API endpoints.
+ * Per-model, per-profile, per-agent-type sampling parameter control for OpenAI-compatible API endpoints.
  * Supports Ollama, vLLM, SGLang, LM Studio, OpenRouter, and other OpenAI-compatible backends.
  */
 
@@ -11,11 +11,13 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import {
 	loadConfig,
 	getActiveParams,
+	resolveEffectiveProfile,
 	hasAnySamplingParams,
 	isOpenAiStyleApi,
 	injectSamplingParams,
 	formatSamplingStatus,
 	getProfileNames,
+	parseActiveAgentTag,
 	OPENAI_STYLE_APIS,
 	SAMPLING_PARAMS_KEYS,
 	type SamplingConfig,
@@ -28,6 +30,7 @@ import {
 
 let config: SamplingConfig = {};
 let activeProfileName: string | undefined;
+let currentAgentType: string | undefined;
 
 const DEBUG = process.env.PI_SAMPLING_DEBUG === "1";
 
@@ -67,10 +70,12 @@ function logAlways(cwd: string, message: string) {
 // ============================================================================
 
 function updateStatus(ctx: ExtensionContext, modelId: string) {
-	const params = getActiveParams(modelId, config, activeProfileName);
+	const effectiveProfile = resolveEffectiveProfile(modelId, config, activeProfileName, currentAgentType);
+	const params = getActiveParams(modelId, config, activeProfileName, currentAgentType);
 	const status = formatSamplingStatus(params);
+	const agentLabel = currentAgentType ? `[${currentAgentType}] ` : "";
 	if (status) {
-		ctx.ui.setStatus("sampling", `sampling:${activeProfileName ?? "default"} ${status}`);
+		ctx.ui.setStatus("sampling", `${agentLabel}sampling:${effectiveProfile ?? activeProfileName ?? "default"} ${status}`);
 	} else {
 		ctx.ui.setStatus("sampling", undefined);
 	}
@@ -104,6 +109,18 @@ export default function samplingExtension(pi: ExtensionAPI) {
 		type: "string",
 	});
 
+	// Detect agent type from system prompt before each agent turn
+	pi.on("before_agent_start", async (event, ctx) => {
+		const tag = parseActiveAgentTag(event.systemPrompt);
+		if (tag !== currentAgentType) {
+			currentAgentType = tag;
+			logAlways(ctx.cwd, `[before_agent_start] Detected agent type: ${tag ?? "main"}`);
+			if (ctx.model) {
+				updateStatus(ctx, `${ctx.model.provider}/${ctx.model.id}`);
+			}
+		}
+	});
+
 	// Handle model changes to update status
 	pi.on("model_select", async (event, ctx) => {
 		const modelId = `${event.model.provider}/${event.model.id}`;
@@ -127,15 +144,16 @@ export default function samplingExtension(pi: ExtensionAPI) {
 			return;
 		}
 
-		const params = getActiveParams(modelId, config, activeProfileName);
-		logAlways(ctx.cwd, `[before_provider_request] Resolved params: ${JSON.stringify(params)}`);
+		const effectiveProfile = resolveEffectiveProfile(modelId, config, activeProfileName, currentAgentType);
+		const params = getActiveParams(modelId, config, activeProfileName, currentAgentType);
+		logAlways(ctx.cwd, `[before_provider_request] Resolved params: ${JSON.stringify(params)} (agent: ${currentAgentType ?? "main"}, effectiveProfile: ${effectiveProfile ?? activeProfileName ?? "default"})`);
 
 		if (!hasAnySamplingParams(params)) {
 			logAlways(ctx.cwd, `[before_provider_request] No sampling params for ${modelId}, passing through`);
 			return;
 		}
 
-		logDebug(ctx.cwd, `[before_provider_request] Before injection for ${modelId} (profile: ${activeProfileName ?? "default"})`, event.payload);
+		logDebug(ctx.cwd, `[before_provider_request] Before injection for ${modelId} (agent: ${currentAgentType ?? "main"}, profile: ${effectiveProfile ?? activeProfileName ?? "default"})`, event.payload);
 		const modified = injectSamplingParams(event.payload, params);
 		logDebug(ctx.cwd, `[before_provider_request] After injection for ${modelId}`, modified);
 
@@ -164,13 +182,21 @@ export default function samplingExtension(pi: ExtensionAPI) {
 				const current = activeProfileName ?? "default";
 				let modelId = "(no model)";
 				let params: SamplingParams = {};
+				let effectiveProfile: string | undefined;
 
 				if (ctx.model) {
 					modelId = `${ctx.model.provider}/${ctx.model.id}`;
-					params = getActiveParams(modelId, config, activeProfileName);
+					params = getActiveParams(modelId, config, activeProfileName, currentAgentType);
+					effectiveProfile = resolveEffectiveProfile(modelId, config, activeProfileName, currentAgentType);
 				}
 
 				let msg = `Profile: ${current}\n`;
+				if (currentAgentType) {
+					msg += `Agent: ${currentAgentType}\n`;
+					if (effectiveProfile && effectiveProfile !== current) {
+						msg += `Effective profile: ${effectiveProfile}\n`;
+					}
+				}
 				if (profiles.length > 0) {
 					msg += `Available: ${profiles.join(", ")}\n`;
 				}
@@ -200,7 +226,7 @@ export default function samplingExtension(pi: ExtensionAPI) {
 	// Initialize on session start
 	pi.on("session_start", async (event, ctx) => {
 		config = loadConfig(ctx.cwd);
-		logAlways(ctx.cwd, `[session_start] Config loaded. Profiles: ${Object.keys(config.profiles ?? {}).join(", ") || "none"}. Models: ${Object.keys(config.models ?? {}).join(", ") || "none"}. Reason: ${event.reason}`);
+		logAlways(ctx.cwd, `[session_start] Config loaded. Profiles: ${Object.keys(config.profiles ?? {}).join(", ") || "none"}. Models: ${Object.keys(config.models ?? {}).join(", ") || "none"}. Agent profiles: ${Object.keys(config.agentProfiles ?? {}).join(", ") || "none"}. Reason: ${event.reason}`);
 
 		// Check CLI flag first
 		const flag = pi.getFlag("sampling-profile");
@@ -227,6 +253,10 @@ export default function samplingExtension(pi: ExtensionAPI) {
 			activeProfileName = "default";
 			logAlways(ctx.cwd, `[session_start] Defaulted to "default" profile`);
 		}
+
+		// Reset agent type detection on new session
+		currentAgentType = undefined;
+		logAlways(ctx.cwd, `[session_start] Reset agent type cache`);
 
 		if (ctx.model) {
 			updateStatus(ctx, `${ctx.model.provider}/${ctx.model.id}`);
