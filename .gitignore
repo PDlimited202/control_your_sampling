@@ -1,4 +1,6 @@
 node_modules/
-.pi/sampling-debug.log
 *.log
 .DS_Store
+
+# Pi runtime files — never commit active configs or debug logs
+.pi/

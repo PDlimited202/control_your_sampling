@@ -29,7 +29,9 @@ Copy `sampling.ts` to `~/.pi/agent/extensions/sampling.ts` (global) or `.pi/exte
 
 ## Configuration
 
-Create `~/.pi/agent/sampling.json` (global) or `.pi/sampling.json` (project-local):
+Create your config at `~/.pi/agent/sampling.json` (global, all projects) or `.pi/sampling.json` (project-local, overrides global). **Keep `.pi/sampling.json` gitignored** — put your personal settings in the global config, and only commit project-specific overrides if they are intended for the whole team.
+
+See [`examples/sampling.json`](examples/sampling.json) for a full example with profiles, model overrides, and agent-type mappings.
 
 ```json
 {
@@ -151,15 +153,40 @@ For example, with profile `precise` active and model `ollama/llama3.1:8b`:
 
 The current profile is shown in the pi footer (e.g., `sampling:default`).
 
-### Per-Agent Contexts
+### Agent-Type-Aware Profiles (pi-subagents integration)
 
-For different agent types (main agent, subagents, Plan agents, Explore agents), you can:
+When you have [`@gotgenes/pi-subagents`](https://github.com/gotgenes/pi-packages/tree/main/packages/pi-subagents) installed, the extension automatically detects which agent type is running — `general-purpose`, `Explore`, `Plan`, or custom agents — and can apply a different sampling profile per agent type and per model.
 
-1. **Set profile per project**: Put `.pi/sampling.json` in your project with a default profile for that codebase
-2. **Pass via CLI flag**: Launch subagents with `--sampling-profile <name>` if your workflow supports passing flags
-3. **Use environment variable**: Set `PI_SAMPLING_PROFILE=precise` before launching pi
+Add an `agentProfiles` section to your config:
 
-## Advanced: Custom Profiles
+```json
+{
+  "profiles": {
+    "default": { "temperature": 0.7, "top_p": 0.9 },
+    "precise": { "temperature": 0.2, "top_p": 0.1 },
+    "kimi-precise": { "temperature": 0.15, "top_p": 0.08, "top_k": 15 }
+  },
+  "agentProfiles": {
+    "Explore": {
+      "accounts/fireworks/models/kimi-k2p6": "kimi-precise",
+      "*": "precise"
+    },
+    "Plan": {
+      "*": "default"
+    }
+  }
+}
+```
+
+**How it works:** `pi-subagents` injects an `<active_agent name="Explore"/>` tag into every child session's system prompt. This extension parses that tag in `before_agent_start`, caches the agent type, and resolves the effective profile before each provider request. The resolution order is:
+
+1. **Agent type + model match** (`agentProfiles.<type>.<pattern>`) — highest priority
+2. **Globally active profile** (`/sampling`, CLI flag, env var, or `default`)
+3. **Model-specific overrides** (`models.<pattern>`) — always apply on top of the resolved profile
+
+The agent type is shown in the pi footer: `[Explore] sampling:kimi-precise t=0.15 p=0.08 k=15`.
+
+### Profile Inheritance
 
 You can define any number of profiles. Common patterns for coding agents:
 
