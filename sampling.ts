@@ -211,6 +211,24 @@ export default function samplingExtension(pi: ExtensionAPI) {
 				return;
 			}
 
+			// Reload config on demand
+			if (arg === "reload") {
+				config = loadConfig(ctx.cwd);
+				const profiles = Object.keys(config.profiles ?? {});
+				const models = Object.keys(config.models ?? {});
+				const agentProfiles = Object.keys(config.agentProfiles ?? {});
+				let msg = "Config reloaded.\n";
+				msg += `Profiles: ${profiles.join(", ") || "none"}\n`;
+				msg += `Models: ${models.join(", ") || "none"}\n`;
+				msg += `Agent profiles: ${agentProfiles.join(", ") || "none"}`;
+				ctx.ui.notify(msg, "info");
+				logAlways(ctx.cwd, `[reload] Config reloaded manually. Profiles: ${profiles.join(", ") || "none"}. Models: ${models.join(", ") || "none"}. Agent profiles: ${agentProfiles.join(", ") || "none"}`);
+				if (ctx.model) {
+					updateStatus(ctx, `${ctx.model.provider}/${ctx.model.id}`);
+				}
+				return;
+			}
+
 			if (setProfile(arg, ctx)) {
 				ctx.ui.notify(`Sampling profile: ${arg}`, "info");
 			} else {
