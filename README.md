@@ -13,6 +13,8 @@ For self-hosted and open-source models, the default sampling parameters from the
 
 Commercial APIs (Anthropic, OpenAI) tune these parameters server-side. Self-hosted backends use whatever defaults the backend chooses, which are rarely optimal for coding agents.
 
+Some hosted models (e.g., OpenAI's `gpt-5.5`) reject sampling parameters entirely. In a mixed-provider workflow, you can suppress sampling injection for specific providers or models while keeping it active everywhere else.
+
 This extension gives you fine-grained control over sampling parameters per model, with named profiles for different contexts (coding, planning, creative, etc.).
 
 ## Installation
@@ -98,7 +100,7 @@ All parameters are injected at the top level of the OpenAI chat completions requ
 | `repetition_penalty` | Multiplicative penalty for repetition | 1.0 - 2.0 |
 | `seed` | Deterministic seed for reproducible outputs | Integer |
 
-Most OpenAI-compatible backends ignore unknown parameters, so you can safely include parameters your specific backend doesn't support (e.g., `min_p` for llama.cpp, `top_k` for vLLM).
+Most OpenAI-compatible backends ignore unknown parameters, so you can safely include parameters your specific backend doesn't support (e.g., `min_p` for llama.cpp, `top_k` for vLLM). However, some providers reject any sampling parameters they do not recognize. Use the `skipSampling` feature (below) for those providers.
 
 ### Model Matching
 
@@ -216,6 +218,81 @@ You can define any number of profiles. Common patterns for coding agents:
   }
 }
 ```
+
+## Suppressing Sampling for Specific Providers/Models
+
+Some providers and models reject or ignore sampling parameters. For example, OpenAI's `gpt-5.5` does not accept `temperature`, `top_p`, or other sampling controls. In a mixed-provider setup where you switch between self-hosted models and hosted APIs, you can suppress sampling injection without disabling the extension.
+
+### Three ways to skip sampling
+
+**1. Global pattern deny-list** (`skipSampling`):
+
+```json
+{
+  "skipSampling": ["openai/gpt-5.5", "openai/*"]
+}
+```
+
+**2. Per-profile skip patterns** (`profiles.<name>.skipSampling`):
+
+```json
+{
+  "profiles": {
+    "precise": {
+      "temperature": 0.2,
+      "top_p": 0.1,
+      "skipSampling": ["openai/*"]
+    }
+  }
+}
+```
+
+**3. Per-model override** (`models.<pattern>.skipSampling`):
+
+```json
+{
+  "models": {
+    "openai/gpt-5.5": { "skipSampling": true }
+  }
+}
+```
+
+### Skip precedence
+
+From highest to lowest priority:
+
+1. **Runtime force skip** (`--sampling-skip`, `PI_SAMPLING_SKIP=1`, `/sampling skip`)
+2. **Global `skipSampling`** patterns
+3. **Profile `skipSampling`** patterns (on the resolved profile)
+4. **Model `skipSampling: true`**
+
+If any level matches, sampling parameters are not injected for that request.
+
+### Runtime escape hatches
+
+If you need to temporarily disable sampling injection for a session:
+
+```bash
+# CLI flag
+pi --sampling-skip
+
+# Environment variable
+PI_SAMPLING_SKIP=1 pi
+
+# In-session command
+/sampling skip        # toggle
+/sampling skip on     # force off
+/sampling skip off    # re-enable
+```
+
+### Status indicator
+
+When sampling is suppressed, the status bar shows a suffix:
+
+- `sampling:precise [skipped]` — skipped by config
+- `sampling:precise [force-skipped]` — skipped by runtime toggle/flag/env
+
+The `/sampling` command shows the suppressed parameters and the reason, so you can audit what *would* have been sent.
 
 ## Troubleshooting
 
