@@ -13,6 +13,7 @@ import {
 	getActiveParams,
 	resolveEffectiveProfile,
 	hasAnySamplingParams,
+	shouldSkipSampling,
 	isOpenAiStyleApi,
 	injectSamplingParams,
 	formatSamplingStatus,
@@ -31,6 +32,7 @@ import {
 let config: SamplingConfig = {};
 let activeProfileName: string | undefined;
 let currentAgentType: string | undefined;
+let forceSkipSampling = false;
 
 const DEBUG = process.env.PI_SAMPLING_DEBUG === "1";
 
@@ -71,11 +73,24 @@ function logAlways(cwd: string, message: string) {
 
 function updateStatus(ctx: ExtensionContext, modelId: string) {
 	const effectiveProfile = resolveEffectiveProfile(modelId, config, activeProfileName, currentAgentType);
-	const params = getActiveParams(modelId, config, activeProfileName, currentAgentType);
-	const status = formatSamplingStatus(params);
 	const agentLabel = currentAgentType ? `[${currentAgentType}] ` : "";
+	const base = `${agentLabel}sampling:${effectiveProfile ?? activeProfileName ?? "default"}`;
+
+	if (forceSkipSampling) {
+		ctx.ui.setStatus("sampling", `${base} [force-skipped]`);
+		return;
+	}
+
+	const params = getActiveParams(modelId, config, activeProfileName, currentAgentType);
+	const skip = shouldSkipSampling(modelId, config, activeProfileName, currentAgentType);
+	if (skip.skip) {
+		ctx.ui.setStatus("sampling", `${base} [skipped]`);
+		return;
+	}
+
+	const status = formatSamplingStatus(params);
 	if (status) {
-		ctx.ui.setStatus("sampling", `${agentLabel}sampling:${effectiveProfile ?? activeProfileName ?? "default"} ${status}`);
+		ctx.ui.setStatus("sampling", `${base} ${status}`);
 	} else {
 		ctx.ui.setStatus("sampling", undefined);
 	}
@@ -103,10 +118,14 @@ function setProfile(name: string, ctx: ExtensionContext): boolean {
 // ============================================================================
 
 export default function samplingExtension(pi: ExtensionAPI) {
-	// Register CLI flag
+	// Register CLI flags
 	pi.registerFlag("sampling-profile", {
 		description: "Active sampling profile",
 		type: "string",
+	});
+	pi.registerFlag("sampling-skip", {
+		description: "Disable sampling parameter injection for this session",
+		type: "boolean",
 	});
 
 	// Detect agent type from system prompt before each agent turn
@@ -147,6 +166,15 @@ export default function samplingExtension(pi: ExtensionAPI) {
 		const effectiveProfile = resolveEffectiveProfile(modelId, config, activeProfileName, currentAgentType);
 		const params = getActiveParams(modelId, config, activeProfileName, currentAgentType);
 		logAlways(ctx.cwd, `[before_provider_request] Resolved params: ${JSON.stringify(params)} (agent: ${currentAgentType ?? "main"}, effectiveProfile: ${effectiveProfile ?? activeProfileName ?? "default"})`);
+
+		const skip = forceSkipSampling
+			? { skip: true, reason: "force skip" }
+			: shouldSkipSampling(modelId, config, activeProfileName, currentAgentType);
+
+		if (skip.skip) {
+			logAlways(ctx.cwd, `[before_provider_request] Skipping sampling injection for ${modelId}: ${skip.reason}`);
+			return;
+		}
 
 		if (!hasAnySamplingParams(params)) {
 			logAlways(ctx.cwd, `[before_provider_request] No sampling params for ${modelId}, passing through`);
@@ -201,13 +229,34 @@ export default function samplingExtension(pi: ExtensionAPI) {
 					msg += `Available: ${profiles.join(", ")}\n`;
 				}
 				msg += `Model: ${modelId}\n`;
-				if (hasAnySamplingParams(params)) {
+
+				const skip = forceSkipSampling
+					? { skip: true, reason: "force skip" }
+					: (modelId !== "(no model)" ? shouldSkipSampling(modelId, config, activeProfileName, currentAgentType) : { skip: false });
+
+				if (skip.skip) {
+					msg += `Sampling: ${forceSkipSampling ? "FORCE-SKIPPED" : "SKIPPED"} (${skip.reason})\n`;
+					msg += `Suppressed params: ${JSON.stringify(params, null, 2)}`;
+				} else if (hasAnySamplingParams(params)) {
+					msg += `Sampling: ACTIVE\n`;
 					msg += `Active params: ${JSON.stringify(params, null, 2)}`;
 				} else {
 					msg += "No sampling params configured.";
 				}
 
 				ctx.ui.notify(msg, "info");
+				return;
+			}
+
+			if (arg === "skip" || arg === "skip on" || arg === "skip off") {
+				forceSkipSampling = arg === "skip" ? !forceSkipSampling : arg === "skip on";
+				if (ctx.model) {
+					updateStatus(ctx, `${ctx.model.provider}/${ctx.model.id}`);
+				} else {
+					ctx.ui.setStatus("sampling", forceSkipSampling ? "sampling:[force-skipped]" : undefined);
+				}
+				ctx.ui.notify(`Sampling injection ${forceSkipSampling ? "disabled" : "enabled"}`, "info");
+				logAlways(ctx.cwd, `[command] Force skip toggled: ${forceSkipSampling}`);
 				return;
 			}
 
@@ -270,6 +319,21 @@ export default function samplingExtension(pi: ExtensionAPI) {
 		if (!activeProfileName && config.profiles?.default) {
 			activeProfileName = "default";
 			logAlways(ctx.cwd, `[session_start] Defaulted to "default" profile`);
+		}
+
+		// Reset force skip and apply CLI/env overrides
+		forceSkipSampling = false;
+		const skipFlag = pi.getFlag("sampling-skip");
+		if (skipFlag === true) {
+			forceSkipSampling = true;
+			logAlways(ctx.cwd, "[session_start] Force skip enabled from CLI flag");
+		}
+		if (!forceSkipSampling) {
+			const envSkip = process.env.PI_SAMPLING_SKIP;
+			if (envSkip === "1" || envSkip?.toLowerCase() === "true") {
+				forceSkipSampling = true;
+				logAlways(ctx.cwd, "[session_start] Force skip enabled from env");
+			}
 		}
 
 		// Reset agent type detection on new session
