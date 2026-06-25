@@ -13,14 +13,17 @@ import {
   formatSamplingStatus,
   getProfileNames,
   matchPattern,
+  matchAnyPattern,
   findMatchingParams,
   findMatchingValue,
   mergeConfig,
   parseActiveAgentTag,
   resolveEffectiveProfile,
+  shouldSkipSampling,
   OPENAI_STYLE_APIS,
   type SamplingConfig,
   type SamplingParams,
+  type SamplingModelConfig,
 } from "./sampling-core";
 
 // ============================================================================
@@ -419,6 +422,170 @@ test("findMatchingValue returns string values", () => {
   assertEqual(findMatchingValue("llama.cpp/llama3", mapping), "llama.cpp-profile", "Matches llama.cpp pattern");
   assertEqual(findMatchingValue("accounts/fireworks/models/kimi-k2p6", mapping), "fireworks-profile", "Matches fireworks pattern");
   assertEqual(findMatchingValue("openai/gpt-4", mapping), undefined, "No match returns undefined");
+});
+
+// --- Skip sampling ---
+
+test("matchAnyPattern returns true on first match", () => {
+  assert(matchAnyPattern("openai/gpt-5.5", ["openai/*", "vllm/*"]), "Matches first pattern");
+});
+
+test("matchAnyPattern returns false for no match", () => {
+  assert(!matchAnyPattern("llama.cpp/llama3", ["openai/*", "vllm/*"]), "No pattern matches");
+});
+
+test("matchAnyPattern handles empty and undefined arrays", () => {
+  assert(!matchAnyPattern("openai/gpt-5.5", []), "Empty array returns false");
+  assert(!matchAnyPattern("openai/gpt-5.5", undefined), "Undefined array returns false");
+});
+
+test("shouldSkipSampling global skipSampling", () => {
+  const config: SamplingConfig = {
+    profiles: { default: { temperature: 0.7 } },
+    skipSampling: ["openai/*"],
+  };
+  const result = shouldSkipSampling("openai/gpt-5.5", config, undefined);
+  assert(result.skip, "Global skipSampling matches");
+  assertEqual(result.reason, "global skipSampling", "Reason is global");
+});
+
+test("shouldSkipSampling global skipSampling does not match unrelated model", () => {
+  const config: SamplingConfig = {
+    skipSampling: ["openai/*"],
+  };
+  const result = shouldSkipSampling("llama.cpp/llama3", config, undefined);
+  assert(!result.skip, "Unrelated model not skipped");
+});
+
+test("shouldSkipSampling profile skipSampling", () => {
+  const config: SamplingConfig = {
+    profiles: {
+      default: { temperature: 0.7 },
+      precise: { temperature: 0.2, skipSampling: ["openai/*"] },
+    },
+  };
+  const result = shouldSkipSampling("openai/gpt-5.5", config, "precise");
+  assert(result.skip, "Profile skipSampling matches");
+  assertEqual(result.reason, 'profile "precise" skipSampling', "Reason includes profile");
+});
+
+test("shouldSkipSampling profile skipSampling does not affect other profiles", () => {
+  const config: SamplingConfig = {
+    profiles: {
+      precise: { temperature: 0.2, skipSampling: ["openai/*"] },
+      creative: { temperature: 0.9 },
+    },
+  };
+  const result = shouldSkipSampling("openai/gpt-5.5", config, "creative");
+  assert(!result.skip, "Creative profile not skipped");
+});
+
+test("shouldSkipSampling model override skipSampling", () => {
+  const config: SamplingConfig = {
+    models: {
+      "openai/gpt-5.5": { skipSampling: true },
+    },
+  };
+  const result = shouldSkipSampling("openai/gpt-5.5", config, undefined);
+  assert(result.skip, "Model override skipSampling");
+  assertEqual(result.reason, "model override skipSampling", "Reason is model override");
+});
+
+test("shouldSkipSampling model override skipSampling false does not skip", () => {
+  const config: SamplingConfig = {
+    models: {
+      "openai/gpt-5.5": { temperature: 0.7, skipSampling: false },
+    },
+  };
+  const result = shouldSkipSampling("openai/gpt-5.5", config, undefined);
+  assert(!result.skip, "Explicit false does not skip");
+});
+
+test("shouldSkipSampling uses agent-resolved profile", () => {
+  const config: SamplingConfig = {
+    profiles: {
+      default: { temperature: 0.7 },
+      precise: { temperature: 0.2, skipSampling: ["openai/*"] },
+    },
+    agentProfiles: {
+      Explore: { "*": "precise" },
+    },
+  };
+  const result = shouldSkipSampling("openai/gpt-5.5", config, "default", "Explore");
+  assert(result.skip, "Agent-resolved profile skipSampling");
+  assertEqual(result.reason, 'profile "precise" skipSampling', "Reason includes effective profile");
+});
+
+test("shouldSkipSampling precedence: profile skip over model skipSampling false", () => {
+  const config: SamplingConfig = {
+    profiles: {
+      precise: { temperature: 0.2, skipSampling: ["openai/*"] },
+    },
+    models: {
+      "openai/gpt-5.5": { temperature: 0.7, skipSampling: false },
+    },
+  };
+  const result = shouldSkipSampling("openai/gpt-5.5", config, "precise");
+  assert(result.skip, "Profile skip takes precedence over model skipSampling false");
+});
+
+test("getActiveParams filters out skipSampling field", () => {
+  const config: SamplingConfig = {
+    profiles: {
+      default: { temperature: 0.7, skipSampling: ["openai/*"] },
+    },
+    models: {
+      "openai/gpt-5.5": { skipSampling: true, temperature: 0.5 } as SamplingModelConfig,
+    },
+  };
+  const params = getActiveParams("openai/gpt-5.5", config, undefined);
+  assert(!("skipSampling" in params), "skipSampling not in active params");
+  assertEqual(params.temperature, 0.5, "Temperature still applied");
+  assert(!hasAnySamplingParams({ skipSampling: ["x"] } as SamplingParams), "skipSampling not counted as sampling param");
+});
+
+test("mergeConfig deep merges profile entries", () => {
+  const global: SamplingConfig = {
+    profiles: {
+      default: { temperature: 0.7, skipSampling: ["openai/*"] },
+    },
+  };
+  const project: SamplingConfig = {
+    profiles: {
+      default: { temperature: 0.6 },
+    },
+  };
+  const merged = mergeConfig(global, project);
+  assertEqual(merged.profiles?.default?.temperature, 0.6, "Project temperature overrides");
+  assertEqual(merged.profiles?.default?.skipSampling, ["openai/*"], "Global skipSampling preserved");
+});
+
+test("mergeConfig deep merges model entries", () => {
+  const global: SamplingConfig = {
+    models: {
+      "openai/gpt-5.5": { skipSampling: true },
+    },
+  };
+  const project: SamplingConfig = {
+    models: {
+      "openai/gpt-5.5": { temperature: 0.5 },
+    },
+  };
+  const merged = mergeConfig(global, project);
+  const model = merged.models?.["openai/gpt-5.5"] as SamplingModelConfig | undefined;
+  assertEqual(model?.skipSampling, true, "Global skipSampling preserved");
+  assertEqual(model?.temperature, 0.5, "Project temperature overrides");
+});
+
+test("mergeConfig concatenates top-level skipSampling", () => {
+  const global: SamplingConfig = {
+    skipSampling: ["openai/*"],
+  };
+  const project: SamplingConfig = {
+    skipSampling: ["vllm/qwen*"],
+  };
+  const merged = mergeConfig(global, project);
+  assertEqual(merged.skipSampling, ["openai/*", "vllm/qwen*"], "Arrays concatenated");
 });
 
 // --- Edge cases ---
