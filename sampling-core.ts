@@ -24,11 +24,27 @@ export interface SamplingParams {
 
 export interface SamplingProfile extends SamplingParams {
 	// Profile name comes from the JSON key
+	/**
+	 * Model patterns for which this profile's sampling parameters should
+	 * not be injected. Does not affect other profiles.
+	 */
+	skipSampling?: string[];
+}
+
+export interface SamplingModelConfig extends SamplingParams {
+	/**
+	 * If true, suppress all sampling parameter injection for matching models.
+	 */
+	skipSampling?: boolean;
 }
 
 export interface SamplingConfig {
 	profiles?: Record<string, SamplingProfile>;
-	models?: Record<string, SamplingParams>;
+	models?: Record<string, SamplingModelConfig>;
+	/**
+	 * Global model patterns for which sampling parameters should not be injected.
+	 */
+	skipSampling?: string[];
 	/**
 	 * Agent-specific profile overrides.
 	 * Maps agent type (from pi-subagents <active_agent> tag) to
@@ -100,14 +116,29 @@ export function mergeConfig(global: SamplingConfig | undefined, project: Samplin
 		result.profiles = { ...global.profiles };
 	}
 	if (project?.profiles) {
-		result.profiles = { ...result.profiles, ...project.profiles };
+		result.profiles = result.profiles ?? {};
+		for (const [name, projectProfile] of Object.entries(project.profiles)) {
+			const globalProfile = result.profiles[name] ?? {};
+			result.profiles[name] = { ...globalProfile, ...projectProfile };
+		}
 	}
 
 	if (global?.models) {
 		result.models = { ...global.models };
 	}
 	if (project?.models) {
-		result.models = { ...result.models, ...project.models };
+		result.models = result.models ?? {};
+		for (const [pattern, projectModel] of Object.entries(project.models)) {
+			const globalModel = result.models[pattern] ?? {};
+			result.models[pattern] = { ...globalModel, ...projectModel };
+		}
+	}
+
+	if (global?.skipSampling) {
+		result.skipSampling = [...global.skipSampling];
+	}
+	if (project?.skipSampling) {
+		result.skipSampling = [...(result.skipSampling ?? []), ...project.skipSampling];
 	}
 
 	if (global?.agentProfiles) {
@@ -218,15 +249,23 @@ export function getActiveParams(
 	// Resolve which profile to use (agent-specific overrides take precedence)
 	const effectiveProfile = resolveEffectiveProfile(modelId, config, activeProfileName, agentType);
 
+	const copyParams = (source: SamplingParams) => {
+		for (const key of SAMPLING_PARAMS_KEYS) {
+			if (source[key] !== undefined) {
+				result[key] = source[key];
+			}
+		}
+	};
+
 	if (effectiveProfile && config.profiles?.[effectiveProfile]) {
-		Object.assign(result, config.profiles[effectiveProfile]);
+		copyParams(config.profiles[effectiveProfile]);
 	} else if (config.profiles?.default) {
-		Object.assign(result, config.profiles.default);
+		copyParams(config.profiles.default);
 	}
 
 	const modelOverrides = findMatchingParams(modelId, config.models);
 	if (modelOverrides) {
-		Object.assign(result, modelOverrides);
+		copyParams(modelOverrides);
 	}
 
 	return result;
@@ -234,6 +273,50 @@ export function getActiveParams(
 
 export function hasAnySamplingParams(params: SamplingParams): boolean {
 	return SAMPLING_PARAMS_KEYS.some((key) => params[key] !== undefined);
+}
+
+// ============================================================================
+// Skip Sampling Logic
+// ============================================================================
+
+export function matchAnyPattern(value: string, patterns: string[] | undefined): boolean {
+	if (!patterns) return false;
+	for (const pattern of patterns) {
+		if (matchPattern(pattern, value)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+export function shouldSkipSampling(
+	modelId: string,
+	config: SamplingConfig,
+	activeProfileName: string | undefined,
+	agentType?: string | undefined,
+): { skip: boolean; reason?: string } {
+	if (matchAnyPattern(modelId, config.skipSampling)) {
+		return { skip: true, reason: "global skipSampling" };
+	}
+
+	const effectiveProfile = resolveEffectiveProfile(modelId, config, activeProfileName, agentType);
+	const profile = effectiveProfile && config.profiles?.[effectiveProfile]
+		? config.profiles[effectiveProfile]
+		: config.profiles?.default;
+	const profileName = effectiveProfile && config.profiles?.[effectiveProfile]
+		? effectiveProfile
+		: "default";
+
+	if (matchAnyPattern(modelId, profile?.skipSampling)) {
+		return { skip: true, reason: `profile "${profileName}" skipSampling` };
+	}
+
+	const modelEntry = findMatchingParams(modelId, config.models);
+	if (modelEntry && (modelEntry as SamplingModelConfig).skipSampling === true) {
+		return { skip: true, reason: "model override skipSampling" };
+	}
+
+	return { skip: false };
 }
 
 // ============================================================================
