@@ -516,6 +516,21 @@ test("shouldSkipSampling uses agent-resolved profile", () => {
   assertEqual(result.reason, 'profile "precise" skipSampling', "Reason includes effective profile");
 });
 
+test("shouldSkipSampling OpenAI model with Explore subagent skips via global pattern", () => {
+  const config: SamplingConfig = {
+    skipSampling: ["openai/gpt-5.5", "openai/*"],
+    profiles: {
+      precise: { temperature: 0.2, top_p: 0.1, skipSampling: ["openai/*"] },
+    },
+    agentProfiles: {
+      Explore: { "*": "precise" },
+    },
+  };
+  const result = shouldSkipSampling("openai/gpt-5.4-mini", config, "default", "Explore");
+  assert(result.skip, "OpenAI-hosted model skips sampling even when Explore subagent resolves to precise");
+  assertEqual(result.reason, "global skipSampling", "Global openai/* pattern is the reason");
+});
+
 test("shouldSkipSampling precedence: profile skip over model skipSampling false", () => {
   const config: SamplingConfig = {
     profiles: {
