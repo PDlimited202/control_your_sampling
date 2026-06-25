@@ -603,6 +603,46 @@ test("mergeConfig concatenates top-level skipSampling", () => {
   assertEqual(merged.skipSampling, ["openai/*", "vllm/qwen*"], "Arrays concatenated");
 });
 
+test("shouldSkipSampling skipSamplingApis", () => {
+  const config: SamplingConfig = {
+    profiles: { default: { temperature: 0.7 } },
+    skipSamplingApis: ["openai-codex-responses"],
+  };
+  const result = shouldSkipSampling("gpt-5.5", config, undefined, undefined, "openai-codex-responses");
+  assert(result.skip, "API type skip matches");
+  assertEqual(result.reason, "api openai-codex-responses", "Reason includes API");
+});
+
+test("shouldSkipSampling skipSamplingApis does not match unrelated API", () => {
+  const config: SamplingConfig = {
+    skipSamplingApis: ["openai-codex-responses"],
+  };
+  const result = shouldSkipSampling("llama.cpp/llama3", config, undefined, undefined, "llama-cpp-chat");
+  assert(!result.skip, "Unrelated API not skipped");
+});
+
+test("shouldSkipSampling API skip takes precedence after global model patterns", () => {
+  const config: SamplingConfig = {
+    skipSampling: ["openai/*"],
+    skipSamplingApis: ["openai-codex-responses"],
+  };
+  // gpt-5.4-mini does NOT match openai/* because it lacks the provider prefix
+  const result = shouldSkipSampling("gpt-5.4-mini", config, undefined, undefined, "openai-codex-responses");
+  assert(result.skip, "API skip catches model without provider prefix");
+  assertEqual(result.reason, "api openai-codex-responses", "Reason is API type");
+});
+
+test("mergeConfig concatenates top-level skipSamplingApis", () => {
+  const global: SamplingConfig = {
+    skipSamplingApis: ["openai-codex-responses"],
+  };
+  const project: SamplingConfig = {
+    skipSamplingApis: ["openai-responses"],
+  };
+  const merged = mergeConfig(global, project);
+  assertEqual(merged.skipSamplingApis, ["openai-codex-responses", "openai-responses"], "API arrays concatenated");
+});
+
 // --- Edge cases ---
 
 test("getActiveParams with empty profile and no default", () => {

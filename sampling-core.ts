@@ -46,6 +46,11 @@ export interface SamplingConfig {
 	 */
 	skipSampling?: string[];
 	/**
+	 * API types for which sampling parameters should not be injected.
+	 * Examples: "openai-completions", "openai-responses", "openai-codex-responses".
+	 */
+	skipSamplingApis?: string[];
+	/**
 	 * Agent-specific profile overrides.
 	 * Maps agent type (from pi-subagents <active_agent> tag) to
 	 * model-pattern → profile-name mappings.
@@ -139,6 +144,13 @@ export function mergeConfig(global: SamplingConfig | undefined, project: Samplin
 	}
 	if (project?.skipSampling) {
 		result.skipSampling = [...(result.skipSampling ?? []), ...project.skipSampling];
+	}
+
+	if (global?.skipSamplingApis) {
+		result.skipSamplingApis = [...global.skipSamplingApis];
+	}
+	if (project?.skipSamplingApis) {
+		result.skipSamplingApis = [...(result.skipSamplingApis ?? []), ...project.skipSamplingApis];
 	}
 
 	if (global?.agentProfiles) {
@@ -294,9 +306,14 @@ export function shouldSkipSampling(
 	config: SamplingConfig,
 	activeProfileName: string | undefined,
 	agentType?: string | undefined,
+	api?: string | undefined,
 ): { skip: boolean; reason?: string } {
 	if (matchAnyPattern(modelId, config.skipSampling)) {
 		return { skip: true, reason: "global skipSampling" };
+	}
+
+	if (api && config.skipSamplingApis?.includes(api)) {
+		return { skip: true, reason: `api ${api}` };
 	}
 
 	const effectiveProfile = resolveEffectiveProfile(modelId, config, activeProfileName, agentType);

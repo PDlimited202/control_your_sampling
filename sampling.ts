@@ -71,7 +71,7 @@ function logAlways(cwd: string, message: string) {
 // UI Helpers
 // ============================================================================
 
-function updateStatus(ctx: ExtensionContext, modelId: string) {
+function updateStatus(ctx: ExtensionContext, modelId: string, api?: string) {
 	const effectiveProfile = resolveEffectiveProfile(modelId, config, activeProfileName, currentAgentType);
 	const agentLabel = currentAgentType ? `[${currentAgentType}] ` : "";
 	const base = `${agentLabel}sampling:${effectiveProfile ?? activeProfileName ?? "default"}`;
@@ -82,7 +82,7 @@ function updateStatus(ctx: ExtensionContext, modelId: string) {
 	}
 
 	const params = getActiveParams(modelId, config, activeProfileName, currentAgentType);
-	const skip = shouldSkipSampling(modelId, config, activeProfileName, currentAgentType);
+	const skip = shouldSkipSampling(modelId, config, activeProfileName, currentAgentType, api);
 	if (skip.skip) {
 		ctx.ui.setStatus("sampling", `${base} [skipped]`);
 		return;
@@ -106,7 +106,7 @@ function setProfile(name: string, ctx: ExtensionContext): boolean {
 	}
 	activeProfileName = name;
 	if (ctx.model) {
-		updateStatus(ctx, `${ctx.model.provider}/${ctx.model.id}`);
+		updateStatus(ctx, `${ctx.model.provider}/${ctx.model.id}`, ctx.model.api);
 	} else {
 		ctx.ui.setStatus("sampling", `sampling:${name}`);
 	}
@@ -135,7 +135,7 @@ export default function samplingExtension(pi: ExtensionAPI) {
 			currentAgentType = tag;
 			logAlways(ctx.cwd, `[before_agent_start] Detected agent type: ${tag ?? "main"}`);
 			if (ctx.model) {
-				updateStatus(ctx, `${ctx.model.provider}/${ctx.model.id}`);
+				updateStatus(ctx, `${ctx.model.provider}/${ctx.model.id}`, ctx.model.api);
 			}
 		}
 	});
@@ -143,7 +143,7 @@ export default function samplingExtension(pi: ExtensionAPI) {
 	// Handle model changes to update status
 	pi.on("model_select", async (event, ctx) => {
 		const modelId = `${event.model.provider}/${event.model.id}`;
-		updateStatus(ctx, modelId);
+		updateStatus(ctx, modelId, event.model.api);
 	});
 
 	// Intercept provider requests and inject sampling parameters
@@ -169,7 +169,7 @@ export default function samplingExtension(pi: ExtensionAPI) {
 
 		const skip = forceSkipSampling
 			? { skip: true, reason: "force skip" }
-			: shouldSkipSampling(modelId, config, activeProfileName, currentAgentType);
+			: shouldSkipSampling(modelId, config, activeProfileName, currentAgentType, api);
 
 		if (skip.skip) {
 			logAlways(ctx.cwd, `[before_provider_request] Skipping sampling injection for ${modelId}: ${skip.reason}`);
@@ -232,7 +232,7 @@ export default function samplingExtension(pi: ExtensionAPI) {
 
 				const skip = forceSkipSampling
 					? { skip: true, reason: "force skip" }
-					: (modelId !== "(no model)" ? shouldSkipSampling(modelId, config, activeProfileName, currentAgentType) : { skip: false });
+					: (modelId !== "(no model)" ? shouldSkipSampling(modelId, config, activeProfileName, currentAgentType, ctx.model?.api) : { skip: false });
 
 				if (skip.skip) {
 					msg += `Sampling: ${forceSkipSampling ? "FORCE-SKIPPED" : "SKIPPED"} (${skip.reason})\n`;
@@ -251,7 +251,7 @@ export default function samplingExtension(pi: ExtensionAPI) {
 			if (arg === "skip" || arg === "skip on" || arg === "skip off") {
 				forceSkipSampling = arg === "skip" ? !forceSkipSampling : arg === "skip on";
 				if (ctx.model) {
-					updateStatus(ctx, `${ctx.model.provider}/${ctx.model.id}`);
+					updateStatus(ctx, `${ctx.model.provider}/${ctx.model.id}`, ctx.model.api);
 				} else {
 					ctx.ui.setStatus("sampling", forceSkipSampling ? "sampling:[force-skipped]" : undefined);
 				}
@@ -273,7 +273,7 @@ export default function samplingExtension(pi: ExtensionAPI) {
 				ctx.ui.notify(msg, "info");
 				logAlways(ctx.cwd, `[reload] Config reloaded manually. Profiles: ${profiles.join(", ") || "none"}. Models: ${models.join(", ") || "none"}. Agent profiles: ${agentProfiles.join(", ") || "none"}`);
 				if (ctx.model) {
-					updateStatus(ctx, `${ctx.model.provider}/${ctx.model.id}`);
+					updateStatus(ctx, `${ctx.model.provider}/${ctx.model.id}`, ctx.model.api);
 				}
 				return;
 			}
@@ -341,7 +341,7 @@ export default function samplingExtension(pi: ExtensionAPI) {
 		logAlways(ctx.cwd, `[session_start] Reset agent type cache`);
 
 		if (ctx.model) {
-			updateStatus(ctx, `${ctx.model.provider}/${ctx.model.id}`);
+			updateStatus(ctx, `${ctx.model.provider}/${ctx.model.id}`, ctx.model.api);
 		} else if (activeProfileName) {
 			ctx.ui.setStatus("sampling", `sampling:${activeProfileName}`);
 		}

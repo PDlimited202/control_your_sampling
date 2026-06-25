@@ -223,9 +223,19 @@ You can define any number of profiles. Common patterns for coding agents:
 
 Some providers and models reject or ignore sampling parameters. For example, OpenAI's `gpt-5.5` does not accept `temperature`, `top_p`, or other sampling controls. In a mixed-provider setup where you switch between self-hosted models and hosted APIs, you can suppress sampling injection without disabling the extension.
 
-### Three ways to skip sampling
+### Four ways to skip sampling
 
-**1. Global pattern deny-list** (`skipSampling`):
+**1. Global API type deny-list** (`skipSamplingApis`):
+
+```json
+{
+  "skipSamplingApis": ["openai-codex-responses", "openai-responses", "openai-completions"]
+}
+```
+
+This is the most reliable way to skip sampling for OpenAI-hosted models, because their model IDs are often just `gpt-5.5` without an `openai/` prefix.
+
+**2. Global pattern deny-list** (`skipSampling`):
 
 ```json
 {
@@ -233,7 +243,7 @@ Some providers and models reject or ignore sampling parameters. For example, Ope
 }
 ```
 
-**2. Per-profile skip patterns** (`profiles.<name>.skipSampling`):
+**3. Per-profile skip patterns** (`profiles.<name>.skipSampling`):
 
 ```json
 {
@@ -247,7 +257,7 @@ Some providers and models reject or ignore sampling parameters. For example, Ope
 }
 ```
 
-**3. Per-model override** (`models.<pattern>.skipSampling`):
+**4. Per-model override** (`models.<pattern>.skipSampling`):
 
 ```json
 {
@@ -262,9 +272,10 @@ Some providers and models reject or ignore sampling parameters. For example, Ope
 From highest to lowest priority:
 
 1. **Runtime force skip** (`--sampling-skip`, `PI_SAMPLING_SKIP=1`, `/sampling skip`)
-2. **Global `skipSampling`** patterns
-3. **Profile `skipSampling`** patterns (on the resolved profile)
-4. **Model `skipSampling: true`**
+2. **Global `skipSampling`** model patterns
+3. **Global `skipSamplingApis`** API type patterns
+4. **Profile `skipSampling`** patterns (on the resolved profile)
+5. **Model `skipSampling: true`**
 
 If any level matches, sampling parameters are not injected for that request.
 
