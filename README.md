@@ -13,7 +13,7 @@ For self-hosted and open-source models, the default sampling parameters from the
 
 Commercial APIs (Anthropic, OpenAI) tune these parameters server-side. Self-hosted backends use whatever defaults the backend chooses, which are rarely optimal for coding agents.
 
-Some hosted models (e.g., OpenAI's `gpt-5.5`) reject sampling parameters entirely. In a mixed-provider workflow, you can suppress sampling injection for specific providers or models while keeping it active everywhere else.
+Some hosted models (e.g., OpenAI's `gpt-5.5`) reject sampling parameters entirely. In a mixed-provider workflow, the extension skips known official OpenAI-hosted providers by default while still injecting sampling for local/open-source providers that use OpenAI-compatible endpoints such as `/v1/chat/completions`.
 
 This extension gives you fine-grained control over sampling parameters per model, with named profiles for different contexts (coding, planning, creative, etc.).
 
@@ -100,7 +100,7 @@ All parameters are injected at the top level of the OpenAI chat completions requ
 | `repetition_penalty` | Multiplicative penalty for repetition | 1.0 - 2.0 |
 | `seed` | Deterministic seed for reproducible outputs | Integer |
 
-Most OpenAI-compatible backends ignore unknown parameters, so you can safely include parameters your specific backend doesn't support (e.g., `min_p` for llama.cpp, `top_k` for vLLM). However, some providers reject any sampling parameters they do not recognize. Use the `skipSampling` feature (below) for those providers.
+Most OpenAI-compatible backends ignore unknown parameters, so you can safely include parameters your specific backend doesn't support (e.g., `min_p` for llama.cpp, `top_k` for vLLM). However, some providers reject any sampling parameters they do not recognize. Use the `skipSamplingProviders`, `skipSampling`, or model-level `skipSampling` features (below) for those providers.
 
 ### Model Matching
 
@@ -223,19 +223,38 @@ You can define any number of profiles. Common patterns for coding agents:
 
 Some providers and models reject or ignore sampling parameters. For example, OpenAI's `gpt-5.5` does not accept `temperature`, `top_p`, or other sampling controls. In a mixed-provider setup where you switch between self-hosted models and hosted APIs, you can suppress sampling injection without disabling the extension.
 
-### Four ways to skip sampling
+### Built-in official OpenAI skip
 
-**1. Global API type deny-list** (`skipSamplingApis`):
+By default, sampling injection is skipped for official OpenAI-family providers that reject sampling controls:
+
+- `openai`
+- `openai-codex`
+- `azure-openai-responses`
+- `github-copilot`
+
+This is provider-based, not API-based. A local provider using the OpenAI-compatible `openai-completions` or `openai-responses` transport still receives sampling parameters by default.
+
+If you intentionally want to send sampling parameters to one of the built-in skipped providers, opt it back in:
 
 ```json
 {
-  "skipSamplingApis": ["openai-codex-responses", "openai-responses", "openai-completions"]
+  "allowSamplingProviders": ["openai"]
 }
 ```
 
-This is the most reliable way to skip sampling for OpenAI-hosted models, because their model IDs are often just `gpt-5.5` without an `openai/` prefix.
+### Five ways to skip sampling
 
-**2. Global pattern deny-list** (`skipSampling`):
+**1. Global provider deny-list** (`skipSamplingProviders`):
+
+```json
+{
+  "skipSamplingProviders": ["github-copilot", "some-hosted-provider"]
+}
+```
+
+Use this when a whole provider rejects sampling, regardless of which OpenAI-compatible endpoint shape it uses.
+
+**2. Global model pattern deny-list** (`skipSampling`):
 
 ```json
 {
@@ -243,7 +262,17 @@ This is the most reliable way to skip sampling for OpenAI-hosted models, because
 }
 ```
 
-**3. Per-profile skip patterns** (`profiles.<name>.skipSampling`):
+**3. Global API type deny-list** (`skipSamplingApis`):
+
+```json
+{
+  "skipSamplingApis": ["openai-codex-responses"]
+}
+```
+
+This is a broad escape hatch. Avoid listing `openai-completions` or `openai-responses` unless you really want to disable sampling for every provider using those OpenAI-compatible transports, including local/open-source backends.
+
+**4. Per-profile skip patterns** (`profiles.<name>.skipSampling`):
 
 ```json
 {
@@ -257,7 +286,7 @@ This is the most reliable way to skip sampling for OpenAI-hosted models, because
 }
 ```
 
-**4. Per-model override** (`models.<pattern>.skipSampling`):
+**5. Per-model override** (`models.<pattern>.skipSampling`):
 
 ```json
 {
@@ -273,9 +302,11 @@ From highest to lowest priority:
 
 1. **Runtime force skip** (`--sampling-skip`, `PI_SAMPLING_SKIP=1`, `/sampling skip`)
 2. **Global `skipSampling`** model patterns
-3. **Global `skipSamplingApis`** API type patterns
-4. **Profile `skipSampling`** patterns (on the resolved profile)
-5. **Model `skipSampling: true`**
+3. **Global `skipSamplingProviders`** provider patterns
+4. **Global `skipSamplingApis`** API type patterns
+5. **Built-in official OpenAI provider skip** (unless opted out via `allowSamplingProviders`)
+6. **Profile `skipSampling`** patterns (on the resolved profile)
+7. **Model `skipSampling: true`**
 
 If any level matches, sampling parameters are not injected for that request.
 

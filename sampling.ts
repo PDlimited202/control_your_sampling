@@ -82,7 +82,7 @@ function updateStatus(ctx: ExtensionContext, modelId: string, api?: string) {
 	}
 
 	const params = getActiveParams(modelId, config, activeProfileName, currentAgentType);
-	const skip = shouldSkipSampling(modelId, config, activeProfileName, currentAgentType, api);
+	const skip = shouldSkipSampling(modelId, config, activeProfileName, currentAgentType, api, ctx.model?.provider);
 	if (skip.skip) {
 		ctx.ui.setStatus("sampling", `${base} [skipped]`);
 		return;
@@ -169,7 +169,7 @@ export default function samplingExtension(pi: ExtensionAPI) {
 
 		const skip = forceSkipSampling
 			? { skip: true, reason: "force skip" }
-			: shouldSkipSampling(modelId, config, activeProfileName, currentAgentType, api);
+			: shouldSkipSampling(modelId, config, activeProfileName, currentAgentType, api, ctx.model.provider);
 
 		if (skip.skip) {
 			logAlways(ctx.cwd, `[before_provider_request] Skipping sampling injection for ${modelId}: ${skip.reason}`);
@@ -232,7 +232,7 @@ export default function samplingExtension(pi: ExtensionAPI) {
 
 				const skip = forceSkipSampling
 					? { skip: true, reason: "force skip" }
-					: (modelId !== "(no model)" ? shouldSkipSampling(modelId, config, activeProfileName, currentAgentType, ctx.model?.api) : { skip: false });
+					: (modelId !== "(no model)" ? shouldSkipSampling(modelId, config, activeProfileName, currentAgentType, ctx.model?.api, ctx.model?.provider) : { skip: false });
 
 				if (skip.skip) {
 					msg += `Sampling: ${forceSkipSampling ? "FORCE-SKIPPED" : "SKIPPED"} (${skip.reason})\n`;

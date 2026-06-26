@@ -46,6 +46,16 @@ export interface SamplingConfig {
 	 */
 	skipSampling?: string[];
 	/**
+	 * Provider patterns for which sampling parameters should not be injected.
+	 * Examples: "openai", "openai-codex", "github-copilot".
+	 */
+	skipSamplingProviders?: string[];
+	/**
+	 * Provider patterns that opt out of the built-in official OpenAI skip.
+	 * This only disables the built-in default; explicit skipSampling* rules still apply.
+	 */
+	allowSamplingProviders?: string[];
+	/**
 	 * API types for which sampling parameters should not be injected.
 	 * Examples: "openai-completions", "openai-responses", "openai-codex-responses".
 	 */
@@ -89,6 +99,18 @@ export const OPENAI_STYLE_APIS: string[] = [
 	"openai-responses",
 	"openai-codex-responses",
 	"azure-openai-responses",
+];
+
+/**
+ * Official OpenAI-hosted providers reject most sampling controls for current
+ * GPT/Codex models. Keep OpenAI-compatible local/custom providers enabled by
+ * default by matching provider names, not API transport names.
+ */
+export const DEFAULT_SKIP_SAMPLING_PROVIDERS: string[] = [
+	"openai",
+	"openai-codex",
+	"azure-openai-responses",
+	"github-copilot",
 ];
 
 // ============================================================================
@@ -144,6 +166,20 @@ export function mergeConfig(global: SamplingConfig | undefined, project: Samplin
 	}
 	if (project?.skipSampling) {
 		result.skipSampling = [...(result.skipSampling ?? []), ...project.skipSampling];
+	}
+
+	if (global?.skipSamplingProviders) {
+		result.skipSamplingProviders = [...global.skipSamplingProviders];
+	}
+	if (project?.skipSamplingProviders) {
+		result.skipSamplingProviders = [...(result.skipSamplingProviders ?? []), ...project.skipSamplingProviders];
+	}
+
+	if (global?.allowSamplingProviders) {
+		result.allowSamplingProviders = [...global.allowSamplingProviders];
+	}
+	if (project?.allowSamplingProviders) {
+		result.allowSamplingProviders = [...(result.allowSamplingProviders ?? []), ...project.allowSamplingProviders];
 	}
 
 	if (global?.skipSamplingApis) {
@@ -307,13 +343,24 @@ export function shouldSkipSampling(
 	activeProfileName: string | undefined,
 	agentType?: string | undefined,
 	api?: string | undefined,
+	provider?: string | undefined,
 ): { skip: boolean; reason?: string } {
 	if (matchAnyPattern(modelId, config.skipSampling)) {
 		return { skip: true, reason: "global skipSampling" };
 	}
 
-	if (api && config.skipSamplingApis?.includes(api)) {
+	const resolvedProvider = provider ?? modelId.split("/")[0];
+	if (resolvedProvider && matchAnyPattern(resolvedProvider, config.skipSamplingProviders)) {
+		return { skip: true, reason: `provider ${resolvedProvider}` };
+	}
+
+	if (api && matchAnyPattern(api, config.skipSamplingApis)) {
 		return { skip: true, reason: `api ${api}` };
+	}
+
+	const allowBuiltInProviderSkip = !matchAnyPattern(resolvedProvider, config.allowSamplingProviders);
+	if (allowBuiltInProviderSkip && matchAnyPattern(resolvedProvider, DEFAULT_SKIP_SAMPLING_PROVIDERS)) {
+		return { skip: true, reason: `official OpenAI provider ${resolvedProvider}` };
 	}
 
 	const effectiveProfile = resolveEffectiveProfile(modelId, config, activeProfileName, agentType);

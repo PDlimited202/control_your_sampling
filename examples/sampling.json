@@ -1,11 +1,10 @@
 {
+  "skipSamplingProviders": [
+    "github-copilot"
+  ],
   "skipSampling": [
     "openai/gpt-5.5",
     "openai/*"
-  ],
-  "skipSamplingApis": [
-    "openai-codex-responses",
-    "openai-responses"
   ],
   "profiles": {
     "default": {

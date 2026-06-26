@@ -459,6 +459,7 @@ test("shouldSkipSampling global skipSampling does not match unrelated model", ()
 
 test("shouldSkipSampling profile skipSampling", () => {
   const config: SamplingConfig = {
+    allowSamplingProviders: ["openai"],
     profiles: {
       default: { temperature: 0.7 },
       precise: { temperature: 0.2, skipSampling: ["openai/*"] },
@@ -471,6 +472,7 @@ test("shouldSkipSampling profile skipSampling", () => {
 
 test("shouldSkipSampling profile skipSampling does not affect other profiles", () => {
   const config: SamplingConfig = {
+    allowSamplingProviders: ["openai"],
     profiles: {
       precise: { temperature: 0.2, skipSampling: ["openai/*"] },
       creative: { temperature: 0.9 },
@@ -482,6 +484,7 @@ test("shouldSkipSampling profile skipSampling does not affect other profiles", (
 
 test("shouldSkipSampling model override skipSampling", () => {
   const config: SamplingConfig = {
+    allowSamplingProviders: ["openai"],
     models: {
       "openai/gpt-5.5": { skipSampling: true },
     },
@@ -491,18 +494,20 @@ test("shouldSkipSampling model override skipSampling", () => {
   assertEqual(result.reason, "model override skipSampling", "Reason is model override");
 });
 
-test("shouldSkipSampling model override skipSampling false does not skip", () => {
+test("shouldSkipSampling model override skipSampling false does not skip when built-in provider skip is allowed", () => {
   const config: SamplingConfig = {
+    allowSamplingProviders: ["openai"],
     models: {
       "openai/gpt-5.5": { temperature: 0.7, skipSampling: false },
     },
   };
   const result = shouldSkipSampling("openai/gpt-5.5", config, undefined);
-  assert(!result.skip, "Explicit false does not skip");
+  assert(!result.skip, "Explicit false does not skip when built-in provider skip is allowed");
 });
 
 test("shouldSkipSampling uses agent-resolved profile", () => {
   const config: SamplingConfig = {
+    allowSamplingProviders: ["openai"],
     profiles: {
       default: { temperature: 0.7 },
       precise: { temperature: 0.2, skipSampling: ["openai/*"] },
@@ -603,6 +608,50 @@ test("mergeConfig concatenates top-level skipSampling", () => {
   assertEqual(merged.skipSampling, ["openai/*", "vllm/qwen*"], "Arrays concatenated");
 });
 
+test("shouldSkipSampling default skips official OpenAI providers", () => {
+  const config: SamplingConfig = {
+    profiles: { default: { temperature: 0.7 } },
+  };
+  const result = shouldSkipSampling("openai/gpt-5.5", config, undefined, undefined, "openai-responses", "openai");
+  assert(result.skip, "Official OpenAI provider skipped by default");
+  assertEqual(result.reason, "official OpenAI provider openai", "Reason names official provider");
+});
+
+test("shouldSkipSampling default skips OpenAI Codex provider", () => {
+  const config: SamplingConfig = {
+    profiles: { default: { temperature: 0.7 } },
+  };
+  const result = shouldSkipSampling("openai-codex/gpt-5.5", config, undefined, undefined, "openai-codex-responses", "openai-codex");
+  assert(result.skip, "Official OpenAI Codex provider skipped by default");
+});
+
+test("shouldSkipSampling does not skip local OpenAI-compatible providers by API", () => {
+  const config: SamplingConfig = {
+    profiles: { default: { temperature: 0.7 } },
+  };
+  const result = shouldSkipSampling("local-openai/qwen-coder", config, undefined, undefined, "openai-completions", "local-openai");
+  assert(!result.skip, "Local OpenAI-compatible provider is not skipped by default");
+});
+
+test("shouldSkipSampling allowSamplingProviders disables built-in provider skip", () => {
+  const config: SamplingConfig = {
+    allowSamplingProviders: ["openai"],
+    profiles: { default: { temperature: 0.7 } },
+  };
+  const result = shouldSkipSampling("openai/gpt-5.5", config, undefined, undefined, "openai-responses", "openai");
+  assert(!result.skip, "allowSamplingProviders opts out of built-in OpenAI provider skip");
+});
+
+test("shouldSkipSampling skipSamplingProviders", () => {
+  const config: SamplingConfig = {
+    skipSamplingProviders: ["github-copilot"],
+    profiles: { default: { temperature: 0.7 } },
+  };
+  const result = shouldSkipSampling("github-copilot/gpt-5.4", config, undefined, undefined, "openai-responses", "github-copilot");
+  assert(result.skip, "Configured provider skip matches");
+  assertEqual(result.reason, "provider github-copilot", "Reason names provider");
+});
+
 test("shouldSkipSampling skipSamplingApis", () => {
   const config: SamplingConfig = {
     profiles: { default: { temperature: 0.7 } },
@@ -641,6 +690,20 @@ test("mergeConfig concatenates top-level skipSamplingApis", () => {
   };
   const merged = mergeConfig(global, project);
   assertEqual(merged.skipSamplingApis, ["openai-codex-responses", "openai-responses"], "API arrays concatenated");
+});
+
+test("mergeConfig concatenates top-level provider skip and allow lists", () => {
+  const global: SamplingConfig = {
+    skipSamplingProviders: ["github-copilot"],
+    allowSamplingProviders: ["openai"],
+  };
+  const project: SamplingConfig = {
+    skipSamplingProviders: ["some-hosted-provider"],
+    allowSamplingProviders: ["openai-codex"],
+  };
+  const merged = mergeConfig(global, project);
+  assertEqual(merged.skipSamplingProviders, ["github-copilot", "some-hosted-provider"], "Provider skip arrays concatenated");
+  assertEqual(merged.allowSamplingProviders, ["openai", "openai-codex"], "Provider allow arrays concatenated");
 });
 
 // --- Edge cases ---
