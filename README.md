@@ -85,6 +85,16 @@ See [`examples/sampling.json`](examples/sampling.json) for a full example with p
 
 Project-local configs are merged on top of global configs. Model-specific overrides in project-local configs take precedence.
 
+### Pi 1.0.4 native sampling precedence
+
+Pi 1.0.4 can supply native `samplingParams` and
+`samplingParamsByThinkingLevel` from its model configuration. Pi resolves those
+settings into the provider request before this extension runs. When a parameter
+is already present in that request, Pi's value wins; this extension only fills
+sampling parameters that are absent. This lets a model's thinking-level-specific
+configuration take precedence while retaining this extension as a fallback for
+other configured parameters.
+
 ### Parameter Reference
 
 All parameters are injected at the top level of the OpenAI chat completions request body. What the backend actually respects depends on your inference server:

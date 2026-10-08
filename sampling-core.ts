@@ -408,7 +408,11 @@ export function injectSamplingParams(payload: unknown, params: SamplingParams): 
 
 	const result = { ...payload };
 	for (const key of SAMPLING_PARAMS_KEYS) {
-		if (params[key] !== undefined) {
+		// Pi 1.0.4 resolves model samplingParams and
+		// samplingParamsByThinkingLevel before extensions receive the payload.
+		// Preserve that core configuration; this extension only supplies a
+		// configured value when the request does not already have one.
+		if (params[key] !== undefined && !Object.hasOwn(result, key)) {
 			result[key] = params[key];
 		}
 	}

@@ -245,12 +245,16 @@ test("injectSamplingParams adds sampling params to payload", () => {
   assertEqual((result.messages as any).length, 1, "Messages preserved");
 });
 
-test("injectSamplingParams does not overwrite existing params", () => {
-  const payload = { model: "gpt-4", messages: [], temperature: 0.5 };
-  const params = { temperature: 0.7 };
+test("injectSamplingParams gives core-resolved payload params precedence", () => {
+  // Pi 1.0.4 resolves native samplingParams and samplingParamsByThinkingLevel
+  // before this extension sees the provider payload. The payload must win on
+  // collisions, while this extension still fills missing configured values.
+  const payload = { model: "gpt-4", messages: [], temperature: 0.5, top_p: 0.8 };
+  const params = { temperature: 0.7, top_p: 0.9, seed: 42 };
   const result = injectSamplingParams(payload, params) as Record<string, unknown>;
-  assertEqual(result.temperature, 0.7, "Temperature overwritten by injection");
-  // Note: this is the current behavior. If we want to preserve existing, we need to change logic.
+  assertEqual(result.temperature, 0.5, "Core samplingParams value is preserved");
+  assertEqual(result.top_p, 0.8, "Core thinking-level sampling value is preserved");
+  assertEqual(result.seed, 42, "Extension config fills a missing value");
 });
 
 test("injectSamplingParams skips undefined params", () => {
